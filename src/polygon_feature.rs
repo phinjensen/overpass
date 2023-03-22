@@ -10,6 +10,11 @@ pub enum Rule {
     },
 }
 
+/*
+ * This list is a translation of Martin Raifer's rules list in osmtogeojson.
+ * https://github.com/tyrasd/osmtogeojson/blob/2.0.0/polygon_features.json
+ */
+
 lazy_static! {
     pub static ref POLYGON_FEATURE_RULES: HashMap<&'static str, Rule> = HashMap::from([
         ("building", Rule::Boolean(true)),
@@ -104,7 +109,3 @@ lazy_static! {
         ("craft", Rule::Boolean(true)),
     ]);
 }
-
-/*
- * This list is a translation of Martin Raifer's rules list in osmtogeojson (https://github.com/tyrasd/osmtogeojson/blob/2.0.0/polygon_features.json).
- */

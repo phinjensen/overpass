@@ -6,6 +6,8 @@ use geo_types::{coord, Coord, Geometry, LineString, Point, Polygon};
 use polygon_feature::{Rule, POLYGON_FEATURE_RULES};
 use serde::{Deserialize, Serialize};
 
+type WayNodes = Vec<u64>;
+
 #[derive(Serialize, Deserialize)]
 struct OSM3S {
     timestamp_osm_base: String,
@@ -28,7 +30,7 @@ enum ElementType {
     #[serde(rename = "node")]
     Node { lat: f64, lon: f64 },
     #[serde(rename = "way")]
-    Way { nodes: Vec<u64> },
+    Way { nodes: WayNodes },
     #[serde(rename = "relation")]
     Relation { members: Vec<RelationMember> },
 }
@@ -53,6 +55,7 @@ struct Response {
 #[derive(Debug)]
 pub enum Error {
     IncorrectType(&'static str),
+    InvalidData,
     NodeNotFound,
 }
 
@@ -100,10 +103,31 @@ fn is_polygon_feature(tags: &HashMap<String, String>) -> bool {
     false
 }
 
+/// Returns disparate ways joined into LineStrings (including closed rings where possible)
+fn join_ways(ways: Vec<WayNodes>, node_map: &HashMap<u64, Cow<Element>>) -> Vec<LineString> {
+    let result = Vec::new();
+    // How to figure this out:
+    // - If any way has the same beginning and end, just convert it ot a LineString and remove it
+    // from the list.
+    // - If the end of one way is the same as the beginning of another one, then those should be
+    // joined.
+    result
+}
+
 impl Element {
+    /// Converts a given Overpass API element into the appropriate geo_type.
+    ///
+    /// - A Node is converted into a Point.
+    /// - A Way is converted
+    ///     - into a Polygon if it fits the [polygon feature](https://wiki.openstreetmap.org/wiki/Overpass_turbo/Polygon_Features) rules
+    ///     - into a LineString otherwise
+    /// - A Relation is converted
+    ///
     fn to_geo(&self, element_map: HashMap<u64, Cow<Element>>) -> Result<Geometry, Error> {
         match &self._type {
+            ElementType::Node { lat, lon } => Ok(Point::new(*lon, *lat).into()),
             ElementType::Way { nodes } => {
+                // A way should be composed of nodes that we can convert to geo_types::Coord
                 let points = nodes
                     .iter()
                     .map(
@@ -115,6 +139,14 @@ impl Element {
                         },
                     )
                     .collect::<Result<Vec<Coord>, Error>>()?;
+
+                // A way should also be longer than one node; otherwise it's not a string or
+                // polygon
+                if points.len() <= 1 {
+                    return Err(Error::InvalidData);
+                }
+
+                // Default to a LineString, but wrap it in a Polygon if it fits the requirements
                 let line = LineString::new(points);
                 if let Some(tags) = &self.tags {
                     if nodes.first().unwrap() == nodes.last().unwrap() && is_polygon_feature(tags) {
@@ -123,11 +155,29 @@ impl Element {
                 }
                 Ok(line.into())
             }
-            ElementType::Node { lat, lon } => Ok(Point::new(*lon, *lat).into()),
-            _ => {
-                return Err(Error::IncorrectType(
-                    "Can't generate geo item from anything except Way",
-                ))
+            ElementType::Relation { members } => {
+                // ignore if no members
+                //
+                // if type=route or type=waterway
+                //  Make it a GeometryCollection
+                // if type=multipolygon or type=boundary
+                //  make it a multipolygon:
+                //      count number of outer items (also throw/show an error if there is something with
+                //      a role other than "inner" or "outer")
+                //      ignore if no outer items
+                //      create the multipolygon, conducting validity checks:
+                //          looks for undefined/missing ways
+                //              looks for undefined/missing nodes
+                //          get outer and inner rings
+                //          join all ways to rings
+                //              if any aren't rings, ignore them and give a warning
+                //          look for inner rings with no outer ring (ignore them with a warning)
+                //          remove rings with < 4 nodes (3+connecting)
+                //          ignore polygons without coordinates (possible? Or just by filtering
+                //              other stuff out?)
+                //
+                //
+                panic!("Relations not yet supported!");
             }
         }
     }
