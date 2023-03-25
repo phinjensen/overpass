@@ -1,6 +1,6 @@
 pub mod polygon_feature;
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, convert::TryInto};
 
 use geo_types::{coord, Coord, Geometry, LineString, Point, Polygon};
 use polygon_feature::{Rule, POLYGON_FEATURE_RULES};
@@ -104,14 +104,43 @@ fn is_polygon_feature(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Returns disparate ways joined into LineStrings (including closed rings where possible)
-fn join_ways(ways: Vec<WayNodes>, node_map: &HashMap<u64, Cow<Element>>) -> Vec<LineString> {
-    let result = Vec::new();
-    // How to figure this out:
-    // - If any way has the same beginning and end, just convert it ot a LineString and remove it
-    // from the list.
-    // - If the end of one way is the same as the beginning of another one, then those should be
-    // joined.
-    result
+fn join_ways(
+    ways: Vec<Element>,
+    node_map: &HashMap<u64, Cow<Element>>,
+) -> Result<Vec<LineString>, Error> {
+    let mut result: HashMap<u64, Vec<Coord>> = HashMap::new();
+    for way in ways {
+        if let ElementType::Way { nodes } = way._type {
+            match (nodes.first(), nodes.last()) {
+                (Some(first), Some(last)) => {
+                    if first == last {
+                        result.insert(*last, get_nodes(&nodes, node_map)?);
+                    } else if let Some(coords) = result.get_mut(first) {
+                        coords.extend_from_slice(&get_nodes(&nodes, node_map)?[1..]);
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+    Ok(result
+        .into_values()
+        .map(|nodes| LineString::new(nodes))
+        .collect())
+}
+
+fn get_nodes(nodes: &WayNodes, node_map: &HashMap<u64, Cow<Element>>) -> Result<Vec<Coord>, Error> {
+    nodes
+        .iter()
+        .map(
+            |node| match node_map.get(node).ok_or(Error::NodeNotFound)?._type {
+                ElementType::Node { lat, lon } => Ok(coord! { x: lon, y: lat }),
+                _ => Err(Error::IncorrectType(
+                    "Way must be composed of node types only.",
+                )),
+            },
+        )
+        .collect()
 }
 
 impl Element {
@@ -123,22 +152,12 @@ impl Element {
     ///     - into a LineString otherwise
     /// - A Relation is converted
     ///
-    fn to_geo(&self, element_map: HashMap<u64, Cow<Element>>) -> Result<Geometry, Error> {
+    fn to_geo(&self, element_map: &HashMap<u64, Cow<Element>>) -> Result<Geometry, Error> {
         match &self._type {
             ElementType::Node { lat, lon } => Ok(Point::new(*lon, *lat).into()),
             ElementType::Way { nodes } => {
                 // A way should be composed of nodes that we can convert to geo_types::Coord
-                let points = nodes
-                    .iter()
-                    .map(
-                        |node| match element_map.get(node).ok_or(Error::NodeNotFound)?._type {
-                            ElementType::Node { lat, lon } => Ok(coord! { x: lon, y: lat }),
-                            _ => Err(Error::IncorrectType(
-                                "Way must be composed of node types only.",
-                            )),
-                        },
-                    )
-                    .collect::<Result<Vec<Coord>, Error>>()?;
+                let points = get_nodes(nodes, element_map)?;
 
                 // A way should also be longer than one node; otherwise it's not a string or
                 // polygon
