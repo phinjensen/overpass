@@ -112,22 +112,16 @@ fn join_ways(
     let mut result: HashMap<u64, Vec<Coord>> = HashMap::new();
     for way in ways {
         if let ElementType::Way { nodes } = &way._type {
-            match (nodes.first(), nodes.last()) {
-                (Some(first), Some(last)) => {
-                    if first == last {
-                        result.insert(*last, get_coords(&nodes, node_map)?);
-                    } else if let Some(coords) = result.get_mut(first) {
-                        coords.extend_from_slice(&get_coords(&nodes, node_map)?[1..]);
-                    }
+            if let (Some(first), Some(last)) = (nodes.first(), nodes.last()) {
+                if first == last {
+                    result.insert(*last, get_coords(nodes, node_map)?);
+                } else if let Some(coords) = result.get_mut(first) {
+                    coords.extend_from_slice(&get_coords(nodes, node_map)?[1..]);
                 }
-                _ => (),
             }
         }
     }
-    Ok(result
-        .into_values()
-        .map(|nodes| LineString::new(nodes))
-        .collect())
+    Ok(result.into_values().map(LineString::new).collect())
 }
 
 fn get_coords(
@@ -250,7 +244,7 @@ impl Element {
 
                         for polygon in &mut polygons {
                             for ring in &inner_rings {
-                                if polygons_intersect_ls(&polygon.exterior(), &ring) {
+                                if polygons_intersect_ls(polygon.exterior(), ring) {
                                     polygon.interiors_push(ring.clone())
                                 }
                             }
