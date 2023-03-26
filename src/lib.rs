@@ -1,4 +1,5 @@
 pub mod polygon_feature;
+pub mod tests;
 
 use std::{borrow::Cow, collections::HashMap};
 
